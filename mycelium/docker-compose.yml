@@ -1,0 +1,220 @@
+version: "3.9"
+
+networks:
+  mycelium_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  postgres_data:
+  grafana_data:
+
+services:
+
+  # ─── Rhizome: NATS Messaging Backbone ─────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    container_name: mycelium_nats
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./rhizome/nats.conf:/etc/nats/nats.conf:ro
+      - ./rhizome/certs:/etc/nats/certs:ro
+    ports:
+      - "4222:4222"   # client
+      - "8222:8222"   # monitoring
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.2
+    restart: unless-stopped
+
+  # ─── Database ─────────────────────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: mycelium_db
+    environment:
+      POSTGRES_DB: mycelium
+      POSTGRES_USER: mycelium
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-mycelium_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./shared/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.3
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mycelium"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Spore Nodes (Phase 1) ─────────────────────────────────────────────────
+  spore_light:
+    build:
+      context: ./spore
+      dockerfile: Dockerfile
+    container_name: spore_smart_light_01
+    environment:
+      SPORE_ID: smart_light_01
+      SPORE_TYPE: smart_light
+      NATS_URL: nats://nats:4222
+      DB_URL: postgresql://mycelium:${DB_PASSWORD:-mycelium_secret}@postgres:5432/mycelium
+      CANARY_SERVER: http://canary_server:9999
+      ENABLE_MQTT: "true"
+      ENABLE_MODBUS: "true"
+      ENABLE_HTTP: "true"
+    ports:
+      - "1883:1883"   # MQTT
+      - "502:502"     # Modbus
+      - "8081:8080"   # HTTP API
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.10
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: unless-stopped
+
+  spore_thermostat:
+    build:
+      context: ./spore
+      dockerfile: Dockerfile
+    container_name: spore_thermostat_01
+    environment:
+      SPORE_ID: thermostat_01
+      SPORE_TYPE: thermostat
+      NATS_URL: nats://nats:4222
+      DB_URL: postgresql://mycelium:${DB_PASSWORD:-mycelium_secret}@postgres:5432/mycelium
+      CANARY_SERVER: http://canary_server:9999
+      ENABLE_MQTT: "true"
+      ENABLE_MODBUS: "false"
+      ENABLE_HTTP: "true"
+    ports:
+      - "1884:1883"
+      - "8082:8080"
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.11
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: unless-stopped
+
+  spore_camera:
+    build:
+      context: ./spore
+      dockerfile: Dockerfile
+    container_name: spore_ip_camera_01
+    environment:
+      SPORE_ID: ip_camera_01
+      SPORE_TYPE: ip_camera
+      NATS_URL: nats://nats:4222
+      DB_URL: postgresql://mycelium:${DB_PASSWORD:-mycelium_secret}@postgres:5432/mycelium
+      CANARY_SERVER: http://canary_server:9999
+      ENABLE_MQTT: "false"
+      ENABLE_MODBUS: "false"
+      ENABLE_HTTP: "true"
+      HTTP_PORT: "8080"
+    ports:
+      - "8083:8080"
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.12
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─── Enzymatic AI Engine (Phase 3) ────────────────────────────────────────
+  ai_engine:
+    build:
+      context: ./ai_engine
+      dockerfile: Dockerfile
+    container_name: mycelium_ai
+    environment:
+      NATS_URL: nats://nats:4222
+      DB_URL: postgresql://mycelium:${DB_PASSWORD:-mycelium_secret}@postgres:5432/mycelium
+      DOCKER_SOCKET: /var/run/docker.sock
+      SPORE_IMAGE: mycelium_spore
+      NETWORK_NAME: mycelium_mycelium_net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.20
+    depends_on:
+      - nats
+      - postgres
+    restart: unless-stopped
+
+  # ─── Canary Token Server (Phase 4) ────────────────────────────────────────
+  canary_server:
+    build:
+      context: ./canary_server
+      dockerfile: Dockerfile
+    container_name: mycelium_canary
+    environment:
+      DB_URL: postgresql://mycelium:${DB_PASSWORD:-mycelium_secret}@postgres:5432/mycelium
+      NATS_URL: nats://nats:4222
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      ALERT_EMAIL: ${ALERT_EMAIL:-}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    ports:
+      - "9999:9999"   # token hit receiver
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.30
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─── Dashboard API (Phase 5) ───────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: mycelium_dashboard
+    environment:
+      DB_URL: postgresql://mycelium:${DB_PASSWORD:-mycelium_secret}@postgres:5432/mycelium
+      NATS_URL: nats://nats:4222
+    ports:
+      - "3000:3000"
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.40
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─── Grafana (Phase 5) ────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mycelium_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-worldmap-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./shared/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    networks:
+      mycelium_net:
+        ipv4_address: 172.30.0.41
+    depends_on:
+      - postgres
+    restart: unless-stopped

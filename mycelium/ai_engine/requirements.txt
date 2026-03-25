@@ -1,0 +1,5 @@
+nats-py==2.7.2
+asyncpg==0.29.0
+docker==7.1.0
+structlog==24.1.0
+pydantic==2.7.1

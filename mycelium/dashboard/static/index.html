@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Mycelium – Deception Grid</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:       #0a0e17;
+      --panel:    #111827;
+      --border:   #1f2d3d;
+      --green:    #10b981;
+      --red:      #ef4444;
+      --yellow:   #f59e0b;
+      --blue:     #3b82f6;
+      --purple:   #8b5cf6;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; font-size: 13px; }
+
+    header { background: var(--panel); border-bottom: 1px solid var(--border);
+             padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    .logo { color: var(--green); font-size: 18px; font-weight: bold; letter-spacing: 2px; }
+    .logo span { color: var(--muted); }
+    .threat-badge { padding: 4px 12px; border-radius: 4px; font-weight: bold;
+                    font-size: 12px; letter-spacing: 1px; }
+    .threat-low    { background: #064e3b; color: var(--green); }
+    .threat-medium { background: #78350f; color: var(--yellow); }
+    .threat-high   { background: #7f1d1d; color: var(--red); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.6 } }
+
+    .layout { display: grid; grid-template-columns: 280px 1fr 320px;
+              grid-template-rows: auto 1fr auto; gap: 1px; height: calc(100vh - 49px); }
+
+    .panel { background: var(--panel); border: 1px solid var(--border); padding: 14px; overflow: auto; }
+    .panel-title { color: var(--muted); font-size: 11px; letter-spacing: 2px;
+                   text-transform: uppercase; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+
+    /* Metric cards */
+    .metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px; }
+    .metric-card { background: var(--panel); border: 1px solid var(--border);
+                   padding: 12px; border-radius: 6px; text-align: center; }
+    .metric-value { font-size: 28px; font-weight: bold; color: var(--green); }
+    .metric-label { color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+    /* Network graph */
+    #network-canvas { width: 100%; height: 100%; }
+
+    /* Spore list */
+    .spore-item { padding: 8px; border: 1px solid var(--border); border-radius: 4px;
+                  margin-bottom: 6px; cursor: default; }
+    .spore-item:hover { border-color: var(--green); }
+    .spore-header { display: flex; justify-content: space-between; align-items: center; }
+    .spore-id { color: var(--green); font-weight: bold; font-size: 12px; }
+    .spore-status { width: 8px; height: 8px; border-radius: 50%; }
+    .status-active   { background: var(--green); }
+    .status-sleeping { background: var(--muted); }
+    .spore-type  { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .proto-tag { display: inline-block; padding: 1px 5px; border-radius: 3px;
+                 font-size: 10px; margin-right: 3px; background: #1e3a5f; color: var(--blue); }
+    .dynamic-tag { background: #2d1b69; color: var(--purple); }
+
+    /* Event feed */
+    .event-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .event-item:last-child { border-bottom: none; }
+    .event-time { color: var(--muted); font-size: 10px; }
+    .event-ip   { color: var(--red); }
+    .event-type { font-size: 11px; }
+    .sev-high   { color: var(--red); }
+    .sev-medium { color: var(--yellow); }
+    .sev-low    { color: var(--green); }
+
+    /* Timeline chart area */
+    .chart-area { padding: 12px; }
+    canvas { max-height: 180px; }
+
+    /* Canary hits */
+    .canary-hit { background: #1a0a2e; border: 1px solid var(--purple);
+                  border-radius: 4px; padding: 8px; margin-bottom: 6px; }
+    .canary-ip { color: var(--purple); font-weight: bold; }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .grid-row-2 { grid-column: 1 / -1; }
+    .conn-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .conn-table th { color: var(--muted); text-align: left; padding: 4px 8px;
+                     border-bottom: 1px solid var(--border); }
+    .conn-table td { padding: 4px 8px; border-bottom: 1px solid #1a2030; }
+    .conn-table tr:hover td { background: #1a2030; }
+
+    .tag-mqtt   { color: #06b6d4; }
+    .tag-modbus { color: #f59e0b; }
+    .tag-http   { color: #10b981; }
+
+    .deception-score { font-size: 42px; font-weight: bold; color: var(--purple);
+                        text-align: center; padding: 8px 0; }
+    .score-sub { color: var(--muted); font-size: 11px; text-align: center; margin-top: 2px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API = "";   // same origin
+
+function useInterval(fn, ms) {
+  const cb = useRef(fn);
+  useEffect(() => { cb.current = fn; }, [fn]);
+  useEffect(() => {
+    const id = setInterval(() => cb.current(), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+}
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(typeof ts === "number" ? ts * 1000 : ts);
+  return d.toLocaleTimeString();
+}
+
+function sevClass(s) {
+  if (s >= 0.7) return "sev-high";
+  if (s >= 0.35) return "sev-medium";
+  return "sev-low";
+}
+
+// ── Network Graph ─────────────────────────────────────────────────────────────
+function NetworkGraph({ spores, threats }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width  = canvas.offsetWidth;
+    const H = canvas.height = canvas.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
+
+    // Background grid
+    ctx.strokeStyle = "#1a2030";
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+    if (spores.length === 0) return;
+
+    // Layout spores in a circle
+    const cx = W / 2, cy = H / 2, r = Math.min(W, H) * 0.32;
+    const sporePos = {};
+    spores.forEach((sp, i) => {
+      const angle = (i / spores.length) * Math.PI * 2 - Math.PI / 2;
+      sporePos[sp.spore_id] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+    });
+
+    // Draw rhizome connections (spore → spore mesh)
+    ctx.strokeStyle = "#1d3a20";
+    ctx.lineWidth = 0.8;
+    spores.forEach((a, i) => {
+      spores.slice(i + 1).forEach(b => {
+        const pa = sporePos[a.spore_id], pb = sporePos[b.spore_id];
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+      });
+    });
+
+    // Draw attacker connections (from recent threats)
+    const recent = threats.slice(0, 15);
+    const attackerMap = {};
+    recent.forEach(t => {
+      if (!attackerMap[t.source_ip]) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist  = Math.min(W, H) * 0.48;
+        attackerMap[t.source_ip] = {
+          x: cx + dist * Math.cos(angle),
+          y: cy + dist * Math.sin(angle),
+        };
+      }
+    });
+
+    // Draw attacker → spore lines
+    recent.forEach(t => {
+      const aPos  = attackerMap[t.source_ip];
+      const sPos  = sporePos[t.detector_spore];
+      if (!aPos || !sPos) return;
+      const alpha = Math.max(0.1, t.severity || 0.5);
+      ctx.strokeStyle = `rgba(239,68,68,${alpha * 0.7})`;
+      ctx.lineWidth = t.severity > 0.7 ? 2 : 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(aPos.x, aPos.y); ctx.lineTo(sPos.x, sPos.y); ctx.stroke();
+      ctx.setLineDash([]);
+    });
+
+    // Draw central Rhizome hub
+    ctx.fillStyle = "#10b98133";
+    ctx.strokeStyle = "#10b981";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#10b981";
+    ctx.font = "bold 11px Courier New";
+    ctx.textAlign = "center";
+    ctx.fillText("RHIZOME", cx, cy + 4);
+
+    // Draw spore nodes
+    spores.forEach(sp => {
+      const pos   = sporePos[sp.spore_id];
+      const alive = sp.status === "active";
+      const isDyn = sp.is_dynamic;
+
+      ctx.fillStyle   = isDyn ? "#2d1b69" : (alive ? "#064e3b" : "#1a2030");
+      ctx.strokeStyle = isDyn ? "#8b5cf6"  : (alive ? "#10b981" : "#64748b");
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, 18, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = isDyn ? "#a78bfa" : (alive ? "#10b981" : "#64748b");
+      ctx.font = "9px Courier New";
+      ctx.textAlign = "center";
+      ctx.fillText(sp.spore_type?.replace("_", " "), pos.x, pos.y + 3);
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "8px Courier New";
+      ctx.fillText(sp.spore_id.slice(0, 12), pos.x, pos.y + 28);
+    });
+
+    // Draw attacker nodes
+    Object.entries(attackerMap).forEach(([ip, pos]) => {
+      const hot = recent.find(t => t.source_ip === ip && t.severity > 0.6);
+      ctx.fillStyle   = hot ? "#7f1d1d" : "#3b1a1a";
+      ctx.strokeStyle = hot ? "#ef4444" : "#7f1d1d";
+      ctx.lineWidth = hot ? 2 : 1;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, 12, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#ef4444";
+      ctx.font = "8px Courier New";
+      ctx.textAlign = "center";
+      ctx.fillText(ip.split(".").slice(-2).join("."), pos.x, pos.y + 4);
+    });
+
+  }, [spores, threats]);
+
+  return <canvas ref={canvasRef} id="network-canvas" style={{width:"100%",height:"100%"}} />;
+}
+
+// ── Timeline Chart ────────────────────────────────────────────────────────────
+function TimelineChart({ data }) {
+  const ref = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current || !data.length) return;
+    if (chartRef.current) chartRef.current.destroy();
+    chartRef.current = new Chart(ref.current, {
+      type: "bar",
+      data: {
+        labels:   data.map(d => fmtTime(d.bucket)),
+        datasets: [{
+          label: "Events",
+          data:  data.map(d => d.events),
+          backgroundColor: data.map(d =>
+            d.avg_severity > 0.7 ? "#ef444488" :
+            d.avg_severity > 0.3 ? "#f59e0b88" : "#10b98188"
+          ),
+          borderColor: "transparent",
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: "#64748b", maxTicksLimit: 8 }, grid: { color: "#1f2d3d" } },
+          y: { ticks: { color: "#64748b" }, grid: { color: "#1f2d3d" } },
+        },
+      },
+    });
+    return () => chartRef.current?.destroy();
+  }, [data]);
+
+  return <canvas ref={ref} />;
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [spores,    setSpores]    = useState([]);
+  const [threats,   setThreats]   = useState([]);
+  const [conns,     setConns]     = useState([]);
+  const [canaryHits, setCanary]   = useState([]);
+  const [score,     setScore]     = useState({});
+  const [level,     setLevel]     = useState("low");
+  const [timeline,  setTimeline]  = useState([]);
+  const [liveEvents, setLive]     = useState([]);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [sp, th, co, ca, sc, lv, tl] = await Promise.all([
+        fetch(`${API}/api/spores`).then(r => r.json()),
+        fetch(`${API}/api/threats/recent?limit=50`).then(r => r.json()),
+        fetch(`${API}/api/connections/recent?limit=100`).then(r => r.json()),
+        fetch(`${API}/api/canary/hits?limit=20`).then(r => r.json()),
+        fetch(`${API}/api/deception_score`).then(r => r.json()),
+        fetch(`${API}/api/threat_level`).then(r => r.json()),
+        fetch(`${API}/api/timeline?hours=6`).then(r => r.json()),
+      ]);
+      setSpores(sp);
+      setThreats(th);
+      setConns(co);
+      setCanary(ca);
+      setScore(sc);
+      setLevel(lv.level || "low");
+      setTimeline(tl);
+    } catch (e) { /* backend may not be up yet */ }
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useInterval(fetchAll, 5000);
+
+  // SSE live feed
+  useEffect(() => {
+    const es = new EventSource(`${API}/api/stream`);
+    es.onmessage = e => {
+      try {
+        const evt = JSON.parse(e.data);
+        if (evt.type === "connected") return;
+        setLive(prev => [evt, ...prev].slice(0, 60));
+        if (evt.subject === "threat.level") setLevel(evt.data?.level || "low");
+      } catch {}
+    };
+    return () => es.close();
+  }, []);
+
+  return (
+    <>
+      <header>
+        <div className="logo">🍄 PROJECT <span>MYCELIUM</span></div>
+        <span className={`threat-badge threat-${level}`}>
+          THREAT: {level.toUpperCase()}
+        </span>
+        <span style={{color:"var(--muted)",marginLeft:"auto",fontSize:11}}>
+          {spores.filter(s=>s.status==="active").length} active spores &nbsp;|&nbsp;
+          {spores.filter(s=>s.is_dynamic).length} dynamic
+        </span>
+      </header>
+
+      <div className="layout">
+
+        {/* ── Left: Spore Registry ─────────────────────────── */}
+        <div className="panel" style={{gridColumn:1,gridRow:"1/3"}}>
+          <div className="panel-title">⬡ Spore Nodes</div>
+          {spores.map(sp => (
+            <div className="spore-item" key={sp.spore_id}>
+              <div className="spore-header">
+                <span className="spore-id">{sp.spore_id}</span>
+                <span className={`spore-status status-${sp.status}`} />
+              </div>
+              <div className="spore-type">{sp.spore_type} {sp.is_dynamic && <span className="proto-tag dynamic-tag">DYN</span>}</div>
+              <div style={{marginTop:4}}>
+                {(sp.protocols||[]).map(p=>(
+                  <span key={p} className="proto-tag">{p}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Centre-top: Network Graph ────────────────────── */}
+        <div className="panel" style={{gridColumn:2,gridRow:1,minHeight:340}}>
+          <div className="panel-title">◉ Deception Grid – Live Topology</div>
+          <NetworkGraph spores={spores} threats={threats} />
+        </div>
+
+        {/* ── Centre-bottom: Timeline + Connections ─────────── */}
+        <div className="panel" style={{gridColumn:2,gridRow:2,overflow:"auto"}}>
+          <div className="panel-title">◈ Event Timeline (last 6h)</div>
+          <div className="chart-area">
+            <TimelineChart data={timeline} />
+          </div>
+          <div className="panel-title" style={{marginTop:14}}>⟶ Recent Connections</div>
+          <table className="conn-table">
+            <thead>
+              <tr><th>Time</th><th>Spore</th><th>Proto</th><th>Source IP</th><th>URI</th></tr>
+            </thead>
+            <tbody>
+              {conns.slice(0,30).map((c,i)=>(
+                <tr key={i}>
+                  <td>{fmtTime(c.timestamp)}</td>
+                  <td style={{color:"var(--green)"}}>{c.spore_id}</td>
+                  <td className={`tag-${c.protocol}`}>{c.protocol}</td>
+                  <td style={{color:"var(--red)"}}>{c.source_ip}</td>
+                  <td style={{color:"var(--muted)",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}}>{c.uri||"-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Right: Metrics + Alerts + Canary ────────────── */}
+        <div className="panel" style={{gridColumn:3,gridRow:"1/3",display:"flex",flexDirection:"column",gap:12}}>
+
+          {/* Deception score */}
+          <div>
+            <div className="panel-title">⬡ Deception Score</div>
+            <div className="deception-score">{score.total_interactions || 0}</div>
+            <div className="score-sub">total attacker interactions</div>
+            <div className="metrics" style={{gridTemplateColumns:"1fr 1fr",marginTop:8}}>
+              <div className="metric-card">
+                <div className="metric-value" style={{fontSize:20}}>{score.unique_attackers||0}</div>
+                <div className="metric-label">Unique IPs</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-value" style={{fontSize:20,color:"var(--purple)"}}>{score.canary_triggers||0}</div>
+                <div className="metric-label">Canary Hits</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-value" style={{fontSize:20,color:"var(--red)"}}>{score.high_severity_events||0}</div>
+                <div className="metric-label">High Alerts</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-value" style={{fontSize:20,color:"var(--yellow)"}}>
+                  {Math.floor((score.estimated_attacker_seconds_wasted||0)/60)}m
+                </div>
+                <div className="metric-label">Time Wasted</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Canary hits */}
+          <div style={{flex:1,overflow:"auto"}}>
+            <div className="panel-title">🪤 Canary Token Hits</div>
+            {canaryHits.length === 0 && <div style={{color:"var(--muted)"}}>No hits yet</div>}
+            {canaryHits.map((h,i)=>(
+              <div className="canary-hit" key={i}>
+                <div className="canary-ip">{h.source_ip}</div>
+                <div style={{color:"var(--muted)",fontSize:11}}>{h.spore_id} · {fmtTime(h.timestamp)}</div>
+                <div style={{color:"var(--text)",fontSize:10,marginTop:2,wordBreak:"break-all"}}>{h.user_agent?.slice(0,60)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Live event stream */}
+          <div style={{flex:1,overflow:"auto"}}>
+            <div className="panel-title">⚡ Live Event Stream</div>
+            {liveEvents.map((e,i)=>(
+              <div className="event-item" key={i}>
+                <span className="event-time">{fmtTime(e.ts)}</span>
+                {" "}
+                <span style={{color:"var(--blue)",fontSize:10}}>[{e.subject}]</span>
+                {" "}
+                {e.data?.source_ip && <span className="event-ip">{e.data.source_ip} </span>}
+                {e.data?.threat_type && (
+                  <span className={sevClass(e.data.severity||0)}>
+                    {e.data.threat_type} ({((e.data.severity||0)*100).toFixed(0)}%)
+                  </span>
+                )}
+                {e.data?.level && <span style={{color:"var(--yellow)"}}>→ {e.data.level}</span>}
+                {e.data?.token_value && <span style={{color:"var(--purple)"}}>🪤 canary triggered</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
